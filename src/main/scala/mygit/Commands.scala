@@ -3,14 +3,20 @@ package mygit
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.Paths
+import java.nio.file.Path
 
 object Commands {
 
-    val init = Command("init", "Initialize git-in-scala repository in the current directory")(Opts {
-        println("Initializing git-in-scala repository.")
+  val init = Command("init", "Initialize git-in-scala repository in the current directory")(Opts {
+    Git.init()
+  })
 
-        new File(".git-in-scala/objects").mkdirs()
-        new File(".git-in-scala/refs/heads").mkdirs()
-    })
+
+  val commitMessage = Opts.option[String]("message", "Message attached to your commit", "m")
+  def commit = Command("commit", "Create a commit with all the changes you've made.")(commitMessage.map { message =>
+    Git.commit(message)
+  })
 
 }

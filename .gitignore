@@ -6,3 +6,4 @@
 .bloop/
 target/
 metals.sbt
+test-dir/
