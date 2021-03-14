@@ -19,4 +19,9 @@ object Commands {
     Git.commit(message)
   })
 
+
+  def log = Command("log", "Display a log of commits, starting with the current HEAD")( Opts {
+    Git.log()
+  })
+
 }
