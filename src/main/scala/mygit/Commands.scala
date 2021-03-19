@@ -24,4 +24,9 @@ object Commands {
     Git.log()
   })
 
+  val commitHash = Opts.argument[String]()
+  def checkout = Command("checkout", "Restore working tree to a specific commit")(commitHash.map { hash =>
+    Git.checkout(hash)
+  })
+
 }

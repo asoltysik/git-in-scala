@@ -6,6 +6,6 @@ object App extends CommandApp(
   name = "mygit",
   header = "A git clone in Scala",
   main = {
-    Opts.subcommands(Commands.init, Commands.commit, Commands.log).orElse(Opts.help)
+    Opts.subcommands(Commands.init, Commands.commit, Commands.log, Commands.checkout).orElse(Opts.help)
   }
 )

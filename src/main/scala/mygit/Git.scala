@@ -18,6 +18,7 @@ case object Git {
 
     Paths.get(".git-in-scala", "objects").toFile.mkdirs()
     Paths.get(".git-in-scala", "refs", "heads").toFile.mkdirs()
+    Paths.get(".git-in-scala", "HEAD").toFile.createNewFile()
 
     ()
   }
@@ -47,7 +48,10 @@ case object Git {
   def log(): Unit = {
     fetchHead() match {
       case Some(currentCommit) =>
+        // Recursively load commits, starting from the current HEAD and going back to the begginging of history
         val commits = loadCommmits(currentCommit, List.empty)
+
+        // Create a text representation for each commit
         val logStr = commits.map(commit =>
             s"""
              |commit ${commit.commitHash}
@@ -63,6 +67,50 @@ case object Git {
         println("There are no commits in this repository yet.")
     }
   }
+
+
+  def checkout(hash: String): Unit = {
+    getCurrentAndTargetTrees(hash).map { case (currentTree, targetTree) =>
+      //
+      deleteEverythingFromTree(currentTree, root = Path.of(""))
+
+      rebuildEverythingFromTree(targetTree, root = Path.of(""))
+    }
+  }
+
+  private def deleteEverythingFromTree(tree: ExpandedTree, root: Path): Unit = {
+    tree.blobEntries.foreach(treeEntry =>
+      Files.deleteIfExists(root.resolve(treeEntry.name))
+    )
+
+    tree.treeEntries.foreach { tree =>
+      val path = root.resolve(tree.name)
+      deleteEverythingFromTree(tree, root = path)
+      Files.deleteIfExists(path)
+    }
+  }
+
+  private def rebuildEverythingFromTree(tree: ExpandedTree, root: Path): Unit = {
+    tree.blobEntries.foreach { treeEntry =>
+      val bytes = Files.readAllBytes(Paths.get(".git-in-scala", "objects", treeEntry.hash))
+      val path = root.resolve(treeEntry.name)
+      Files.write(path, bytes)
+    }
+
+    tree.treeEntries.foreach { tree =>
+      val path = root.resolve(tree.name)
+      Files.createDirectory(path)
+      rebuildEverythingFromTree(tree, path)
+    }
+  }
+
+  private def getCurrentAndTargetTrees(targetCommit: String): Option[(ExpandedTree, ExpandedTree)] = 
+    for {
+      currentCommitHash <- fetchHead()
+      currentCommit     <- Commit.load(currentCommitHash)
+      targetCommit      <- Commit.load(targetCommit)
+    } yield (ExpandedTree.load(currentCommit.treeHash), ExpandedTree.load(targetCommit.treeHash))
+
 
   @tailrec
   private def loadCommmits(commitHash: String, result: List[Commit]): List[Commit] = {
@@ -97,8 +145,8 @@ case object Git {
   }
   object Commit {
     def load(hash: String): Option[Commit] = {
-      val regexWithParent    = raw"tree (.+)\nparent (.+)\n\n((?s).+)".r
-      val regexWithoutParent = raw"tree (.+)\n\n((?s).+)".r
+      val regexWithParent    = raw"tree (.+)\nparent (.+)\n\n([\s\S]+)".r
+      val regexWithoutParent = raw"tree (.+)\n\n([\s\S]+)".r
       val str = Files.readString(Paths.get(".git-in-scala", "objects", hash))
       str match {
         case regexWithParent(treeHash, parentHash, message) =>
@@ -111,8 +159,35 @@ case object Git {
     }
   }
 
+  case class ExpandedTree(name: String, blobEntries: List[TreeEntry], treeEntries: List[ExpandedTree])
+  object ExpandedTree {
+    def load(rootTreeHash: String, name: String = ""): ExpandedTree = {
+      val entries = Files.readAllLines(Paths.get(".git-in-scala", "objects", rootTreeHash)).asScala.toList
+        .flatMap { 
+          case s"$entryTypeStr $hash $name" =>
+            EntryType.fromString(entryTypeStr).map(entryType => TreeEntry(entryType, hash, name))
+          case _ =>
+            None
+        }
+      
+      val blobEntries = entries.filter(_.entryType == Blob)
+
+      val treeEntries = entries.filter(_.entryType == Tree)
+        .map(entry => ExpandedTree.load(entry.hash, name = entry.name))
+
+      ExpandedTree(name, blobEntries, treeEntries)
+    }
+  }
+
 
   sealed abstract class EntryType(val value: String)
+  object EntryType {
+    def fromString(str: String): Option[EntryType] = str match {
+      case Blob.value => Some(Blob)
+      case Tree.value => Some(Tree)
+      case _ => None
+    }
+  }
   case object Blob extends EntryType("blob")
   case object Tree extends EntryType("tree")
 
@@ -151,7 +226,7 @@ case object Git {
   private def fetchHead(): Option[String] = {
     val path = Path.of(".git-in-scala", "HEAD")
     if(Files.exists(path)) {
-      Some(Files.readString(path))
+      Some(Files.readString(path)).filter(_.nonEmpty)
     } else {
       None
     }
