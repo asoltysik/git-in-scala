@@ -78,6 +78,72 @@ case object Git {
     }
   }
 
+  def status(): Unit = {
+    val maybeTree = fetchHead()
+      .flatMap(hash => Commit.load(hash))
+      .map(commit => commit -> ExpandedTree.load(commit.treeHash))
+    
+    maybeTree match {
+      case Some((commit, tree)) =>
+        val result = getUntrackedPaths(Path.of("."), tree)
+        println(s"Currently at commit ${commit.commitHash}.")
+        if(result.added.isEmpty && result.changed.isEmpty) {
+          println("No changes in the repository since last commit.")
+        } else {
+          if(result.changed.nonEmpty) {
+            println("Files with changes:")
+            result.changed
+              .map(path => "        " ++ path)
+              .foreach(println)
+          }
+
+          if(result.added.nonEmpty) {
+            println("Files not yet tracked:")
+            result.added
+              .map(path => "        " ++ path)
+              .foreach(println)
+          }
+        }
+      case None =>
+        println("No commits in this repository.")
+    }
+  }
+
+  case class StatusResult(added: List[String], changed: List[String])
+
+  private def getUntrackedPaths(path: Path, tree: ExpandedTree): StatusResult = {
+    path.toFile.listFiles()
+      .toList
+      .filter(_.getName != ".git-in-scala")
+      .foldLeft(StatusResult(List.empty, List.empty)) { (result, file) =>
+        if(file.isDirectory) {
+          val maybeExistingTree = tree.treeEntries.find(_.name == file.getName)
+          maybeExistingTree match {
+            case Some(existingTree) =>
+              val innerResult = getUntrackedPaths(path.resolve(file.getName), existingTree)
+              result.copy(
+                added = result.added ::: innerResult.added,
+                changed = result.changed ::: innerResult.changed
+              )
+            case None =>
+              result.copy(added = result.added :+ (path.resolve(file.getName()).toString ++ "/"))
+          }
+        } else {
+          tree.blobEntries.find(_.name == file.getName) match {
+            case Some(existingEntry) => 
+              val fileBytes = Files.readAllBytes(file.toPath)
+              if(hash(fileBytes) != existingEntry.hash) {
+                result.copy(changed = result.changed :+ (path.resolve(file.getName).toString))
+              } else {
+                result
+              }
+            case None => 
+              result.copy(added = result.added :+ (path.resolve(file.getName).toString))
+          }
+        }
+      }
+  }
+
   private def deleteEverythingFromTree(tree: ExpandedTree, root: Path): Unit = {
     tree.blobEntries.foreach(treeEntry =>
       Files.deleteIfExists(root.resolve(treeEntry.name))

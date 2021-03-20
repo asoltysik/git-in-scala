@@ -29,4 +29,8 @@ object Commands {
     Git.checkout(hash)
   })
 
+  def status = Command("status", "Show the status of working directory compared to last commit")( Opts {
+    Git.status()
+  })
+
 }
